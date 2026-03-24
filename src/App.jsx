@@ -17,7 +17,11 @@ function AppShell({ session, userProfile }) {
     session?.user?.email?.split('@')[0] ||
     'Usuario';
 
-  const rawRole = userProfile?.rol;
+  const rawRole =
+    userProfile?.rol ||
+    session?.user?.user_metadata?.rol ||
+    'usuario';
+
   const userRole =
     typeof rawRole === 'string' && rawRole.trim() !== ''
       ? rawRole.trim().toLowerCase()
@@ -111,20 +115,25 @@ export default function App() {
       return;
     }
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .maybeSingle();
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .maybeSingle();
 
-    if (error) {
-      console.error('Error cargando perfil:', error);
+      if (error) {
+        console.error('Error cargando perfil:', error);
+        setUserProfile(null);
+        return;
+      }
+
+      console.log('Perfil cargado:', data);
+      setUserProfile(data ?? null);
+    } catch (error) {
+      console.error('Error inesperado cargando perfil:', error);
       setUserProfile(null);
-      return;
     }
-
-    console.log('Perfil cargado:', data);
-    setUserProfile(data ?? null);
   };
 
   useEffect(() => {
@@ -152,8 +161,11 @@ export default function App() {
 
         setSession(currentSession);
 
+        // Importante: no bloqueamos la app esperando el perfil
+        setLoading(false);
+
         if (currentSession?.user) {
-          await loadProfile(currentSession.user);
+          loadProfile(currentSession.user);
         } else {
           setUserProfile(null);
         }
@@ -162,9 +174,6 @@ export default function App() {
         if (isMounted) {
           setSession(null);
           setUserProfile(null);
-        }
-      } finally {
-        if (isMounted) {
           setLoading(false);
         }
       }
@@ -174,18 +183,17 @@ export default function App() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+    } = supabase.auth.onAuthStateChange((_event, newSession) => {
       if (!isMounted) return;
 
       setSession(newSession);
+      setLoading(false);
 
       if (newSession?.user) {
-        await loadProfile(newSession.user);
+        loadProfile(newSession.user);
       } else {
         setUserProfile(null);
       }
-
-      setLoading(false);
     });
 
     return () => {
