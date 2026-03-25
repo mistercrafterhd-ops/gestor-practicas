@@ -18,8 +18,10 @@ export default function StudentsList({ userRole = 'usuario' }) {
 
   const [showModal, setShowModal] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const isAdmin = userRole === 'admin';
+  const canCreateStudents = ['admin', 'usuario'].includes(userRole);
   const canManageAttendance = ['admin', 'usuario'].includes(userRole);
 
   const today = new Date().toISOString().split('T')[0];
@@ -33,111 +35,128 @@ export default function StudentsList({ userRole = 'usuario' }) {
     return groups.find((g) => String(g.id) === String(groupId))?.name || 'Sin grupo';
   };
 
-const groupedStudents = useMemo(() => {
-  const map = new Map();
+  const searchedStudents = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
 
-  filteredStudents.forEach((student) => {
-    const key = student.name?.trim().toLowerCase();
+    if (!term) return filteredStudents;
 
-    if (!key) return;
+    return filteredStudents.filter((student) => {
+      const studentName = student.name?.toLowerCase() || '';
+      const studentObservations = student.observations?.toLowerCase() || '';
+      const groupName = getGroupName(student.groupId)?.toLowerCase() || '';
 
-    if (!map.has(key)) {
-      map.set(key, {
-        ...student,
-        id: student.id,
-        ids: [student.id],
-        groupIds: student.groupId ? [student.groupId] : [],
-      });
-    } else {
-      const existing = map.get(key);
+      return (
+        studentName.includes(term) ||
+        studentObservations.includes(term) ||
+        groupName.includes(term)
+      );
+    });
+  }, [filteredStudents, searchTerm, groups]);
 
-      existing.ids.push(student.id);
+  const groupedStudents = useMemo(() => {
+    const map = new Map();
 
-      if (!existing.id) {
-        existing.id = student.id;
+    searchedStudents.forEach((student) => {
+      const key = student.name?.trim().toLowerCase();
+
+      if (!key) return;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          ...student,
+          id: student.id,
+          ids: [student.id],
+          groupIds: student.groupId ? [student.groupId] : [],
+        });
+      } else {
+        const existing = map.get(key);
+
+        existing.ids.push(student.id);
+
+        if (!existing.id) {
+          existing.id = student.id;
+        }
+
+        if (
+          student.groupId &&
+          !existing.groupIds.some((id) => String(id) === String(student.groupId))
+        ) {
+          existing.groupIds.push(student.groupId);
+        }
+
+        if (!existing.observations && student.observations) {
+          existing.observations = student.observations;
+        }
+
+        if ((existing.progress ?? 0) < (student.progress ?? 0)) {
+          existing.progress = student.progress ?? 0;
+        }
+
+        if (!existing.startDate && student.startDate) {
+          existing.startDate = student.startDate;
+        }
+
+        if (
+          existing.status?.toLowerCase() !== 'activo' &&
+          student.status?.toLowerCase() === 'activo'
+        ) {
+          existing.status = student.status;
+        }
       }
+    });
 
-      if (
-        student.groupId &&
-        !existing.groupIds.some((id) => String(id) === String(student.groupId))
-      ) {
-        existing.groupIds.push(student.groupId);
-      }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [searchedStudents]);
 
-      if (!existing.observations && student.observations) {
-        existing.observations = student.observations;
-      }
-
-      if ((existing.progress ?? 0) < (student.progress ?? 0)) {
-        existing.progress = student.progress ?? 0;
-      }
-
-      if (!existing.startDate && student.startDate) {
-        existing.startDate = student.startDate;
-      }
-
-      if (
-        existing.status?.toLowerCase() !== 'activo' &&
-        student.status?.toLowerCase() === 'activo'
-      ) {
-        existing.status = student.status;
-      }
-    }
-  });
-
-  return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-}, [filteredStudents]);
-
-const getTodayAttendanceStatus = (student) => {
-  const relatedAttendance = attendance.filter(
-    (a) =>
-      student.ids.some((id) => String(id) === String(a.studentId)) &&
-      String(a.date).slice(0, 10) === today
-  );
-
-  if (relatedAttendance.some((a) => a.status === 'Asiste')) return 'Asiste';
-  if (relatedAttendance.some((a) => a.status === 'Falta')) return 'Falta';
-  return null;
-};
-
-const handleAttendance = async (student, status) => {
-  if (!canManageAttendance) return;
-
-  try {
-    const results = await Promise.all(
-      student.ids.map((id) => markAttendance(id, today, status))
+  const getTodayAttendanceStatus = (student) => {
+    const relatedAttendance = attendance.filter(
+      (a) =>
+        student.ids.some((id) => String(id) === String(a.studentId)) &&
+        String(a.date).slice(0, 10) === today
     );
 
-    const failed = results.find((r) => !r?.ok);
+    if (relatedAttendance.some((a) => a.status === 'Asiste')) return 'Asiste';
+    if (relatedAttendance.some((a) => a.status === 'Falta')) return 'Falta';
+    return null;
+  };
 
-    if (failed) {
-      console.error('Error real al guardar asistencia:', failed.error);
-      alert(`No se pudo guardar la asistencia: ${failed.error}`);
+  const handleAttendance = async (student, status) => {
+    if (!canManageAttendance) return;
+
+    try {
+      const results = await Promise.all(
+        student.ids.map((id) => markAttendance(id, today, status))
+      );
+
+      const failed = results.find((r) => !r?.ok);
+
+      if (failed) {
+        console.error('Error real al guardar asistencia:', failed.error);
+        alert(`No se pudo guardar la asistencia: ${failed.error}`);
+        return;
+      }
+    } catch (error) {
+      console.error('Error marcando asistencia:', error);
+      alert('Hubo un error al marcar la asistencia.');
+    }
+  };
+
+  const handleEdit = (student) => {
+    if (!isAdmin) return;
+
+    const realStudent = filteredStudents.find(
+      (s) => String(s.id) === String(student.ids?.[0])
+    );
+
+    if (!realStudent) {
+      alert('No se pudo cargar el alumno para editar.');
       return;
     }
 
-    console.log('Asistencia guardada correctamente:', results);
-  } catch (error) {
-    console.error('Error marcando asistencia:', error);
-    alert('Hubo un error al marcar la asistencia.');
-  }
-};
+    setEditingStudent(realStudent);
+    setShowModal(true);
+  };
 
-const handleEdit = (student) => {
-  if (!isAdmin) return;
-
-  const realStudent = filteredStudents.find(
-    (s) => String(s.id) === String(student.ids?.[0])
-  );
-
-  if (!realStudent) {
-    alert('No se pudo cargar el alumno para editar.');
-    return;
-  }
-
-  setEditingStudent(realStudent);
-  setShowModal(true);
-};
   const handleDeleteGrouped = async (student) => {
     if (!isAdmin) return;
 
@@ -152,7 +171,7 @@ const handleEdit = (student) => {
   };
 
   const handleNewStudent = () => {
-    if (!isAdmin) return;
+    if (!canCreateStudents) return;
     setEditingStudent(null);
     setShowModal(true);
   };
@@ -178,7 +197,7 @@ const handleEdit = (student) => {
           </p>
         </div>
 
-        {isAdmin && (
+        {canCreateStudents && (
           <button className="btn btn-primary" onClick={handleNewStudent}>
             + Nuevo Alumno
           </button>
@@ -208,6 +227,24 @@ const handleEdit = (student) => {
         </select>
       </div>
 
+      <div className="card" style={{ padding: '1rem', marginBottom: '1.25rem' }}>
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Buscar alumno por nombre, grupo u observaciones..."
+          style={{
+            width: '100%',
+            padding: '0.85rem 1rem',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-color)',
+            background: 'var(--bg-secondary)',
+            color: 'var(--text-primary)',
+            outline: 'none',
+          }}
+        />
+      </div>
+
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         {loading ? (
           <div style={{ padding: '1rem' }}>
@@ -216,7 +253,9 @@ const handleEdit = (student) => {
         ) : groupedStudents.length === 0 ? (
           <div style={{ padding: '1rem' }}>
             <p style={{ color: 'var(--text-secondary)' }}>
-              No hay alumnos en el grupo seleccionado.
+              {searchTerm.trim()
+                ? 'No hay alumnos que coincidan con la búsqueda.'
+                : 'No hay alumnos en el grupo seleccionado.'}
             </p>
           </div>
         ) : (
@@ -430,8 +469,9 @@ const handleEdit = (student) => {
         )}
       </div>
 
-      {isAdmin && showModal && (
+      {canCreateStudents && (
         <Modal
+          isOpen={showModal}
           title={editingStudent ? 'Editar Alumno' : 'Nuevo Alumno'}
           onClose={() => {
             setShowModal(false);

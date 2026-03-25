@@ -46,12 +46,12 @@ export const AppProvider = ({ children }) => {
     };
   };
 
-const mapAttendance = (a) => ({
-  id: a.id,
-  studentId: a.alumno_id,
-  date: String(a.fecha).slice(0, 10),
-  status: a.estado,
-});
+  const mapAttendance = (a) => ({
+    id: a.id,
+    studentId: a.alumno_id,
+    date: String(a.fecha).slice(0, 10),
+    status: a.estado,
+  });
 
   const toStudentDB = (s) => ({
     nombre: s.name,
@@ -76,64 +76,59 @@ const mapAttendance = (a) => ({
     estado: a.status,
   });
 
- const fetchData = useCallback(async () => {
-  try {
-    setLoading(true);
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
 
-    const gRes = await supabase
-      .from('grupos')
-      .select('*')
-      .order('nombre', { ascending: true });
+      const gRes = await supabase
+        .from('grupos')
+        .select('*')
+        .order('nombre', { ascending: true });
 
-    const sRes = await supabase
-      .from('alumnos')
-      .select('*')
-      .order('nombre', { ascending: true });
+      const sRes = await supabase
+        .from('alumnos')
+        .select('*')
+        .order('nombre', { ascending: true });
 
-    const tRes = await supabase
-      .from('tareas')
-      .select('*');
+      const tRes = await supabase
+        .from('tareas')
+        .select('*');
 
-    const aRes = await supabase
-      .from('asistencias')
-      .select('*');
+      const aRes = await supabase
+        .from('asistencias')
+        .select('*');
 
-    console.log('grupos:', gRes);
-    console.log('alumnos:', sRes);
-    console.log('tareas:', tRes);
-    console.log('asistencias:', aRes);
+      if (gRes.error) {
+        console.error('Error cargando grupos:', gRes.error);
+      }
 
-    if (gRes.error) {
-      console.error('Error cargando grupos:', gRes.error);
+      if (sRes.error) {
+        console.error('Error cargando alumnos:', sRes.error);
+      }
+
+      if (tRes.error) {
+        console.error('Error cargando tareas:', tRes.error);
+      }
+
+      if (aRes.error) {
+        console.error('Error cargando asistencias:', aRes.error);
+      }
+
+      const loadedGroups = gRes.data ? gRes.data.map(mapGroup) : [];
+      const loadedStudents = sRes.data ? sRes.data.map(mapStudent) : [];
+      const loadedTasks = tRes.data ? tRes.data.map((t) => mapTask(t, loadedStudents)) : [];
+      const loadedAttendance = aRes.data ? aRes.data.map(mapAttendance) : [];
+
+      setGroups(loadedGroups);
+      setStudents(loadedStudents);
+      setTasks(loadedTasks);
+      setAttendance(loadedAttendance);
+    } catch (error) {
+      console.error('Error general cargando datos desde Supabase:', error);
+    } finally {
+      setLoading(false);
     }
-
-    if (sRes.error) {
-      console.error('Error cargando alumnos:', sRes.error);
-    }
-
-    if (tRes.error) {
-      console.error('Error cargando tareas:', tRes.error);
-    }
-
-    if (aRes.error) {
-      console.error('Error cargando asistencias:', aRes.error);
-    }
-
-    const loadedGroups = gRes.data ? gRes.data.map(mapGroup) : [];
-    const loadedStudents = sRes.data ? sRes.data.map(mapStudent) : [];
-    const loadedTasks = tRes.data ? tRes.data.map((t) => mapTask(t, loadedStudents)) : [];
-    const loadedAttendance = aRes.data ? aRes.data.map(mapAttendance) : [];
-
-    setGroups(loadedGroups);
-    setStudents(loadedStudents);
-    setTasks(loadedTasks);
-    setAttendance(loadedAttendance);
-  } catch (error) {
-    console.error('Error general cargando datos desde Supabase:', error);
-  } finally {
-    setLoading(false);
-  }
-}, []);
+  }, []);
 
   useEffect(() => {
     fetchData();
@@ -275,6 +270,14 @@ const mapAttendance = (a) => ({
 
   const addStudent = async (student) => {
     try {
+      if (!student?.name?.trim()) {
+        throw new Error('El nombre del alumno es obligatorio');
+      }
+
+      if (!student?.groupId) {
+        throw new Error('El grupo es obligatorio');
+      }
+
       const payload = toStudentDB(student);
 
       const { data, error } = await supabase
@@ -300,6 +303,14 @@ const mapAttendance = (a) => ({
     try {
       const cleanUpdated = { ...updated };
       if (cleanUpdated.id) delete cleanUpdated.id;
+
+      if (!cleanUpdated?.name?.trim()) {
+        throw new Error('El nombre del alumno es obligatorio');
+      }
+
+      if (!cleanUpdated?.groupId) {
+        throw new Error('El grupo es obligatorio');
+      }
 
       const payload = toStudentDB(cleanUpdated);
 
@@ -407,64 +418,65 @@ const mapAttendance = (a) => ({
     }
   };
 
-const markAttendance = async (studentId, date, status) => {
-  try {
-    const normalizedStudentId = String(studentId);
-    const normalizedDate = String(date).slice(0, 10);
+  const markAttendance = async (studentId, date, status) => {
+    try {
+      const normalizedStudentId = String(studentId);
+      const normalizedDate = String(date).slice(0, 10);
 
-    const existing = attendance.find(
-      (a) =>
-        String(a.studentId) === normalizedStudentId &&
-        String(a.date).slice(0, 10) === normalizedDate
-    );
-
-    if (existing) {
-      const { data, error } = await supabase
-        .from('asistencias')
-        .update({ estado: status })
-        .eq('id', existing.id)
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      const updatedAttendance = mapAttendance(data);
-
-      setAttendance((prev) =>
-        prev.map((a) =>
-          String(a.id) === String(existing.id) ? updatedAttendance : a
-        )
+      const existing = attendance.find(
+        (a) =>
+          String(a.studentId) === normalizedStudentId &&
+          String(a.date).slice(0, 10) === normalizedDate
       );
-    } else {
-      const payload = {
-        alumno_id: studentId,
-        fecha: normalizedDate,
-        estado: status,
+
+      if (existing) {
+        const { data, error } = await supabase
+          .from('asistencias')
+          .update({ estado: status })
+          .eq('id', existing.id)
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        const updatedAttendance = mapAttendance(data);
+
+        setAttendance((prev) =>
+          prev.map((a) =>
+            String(a.id) === String(existing.id) ? updatedAttendance : a
+          )
+        );
+      } else {
+        const payload = toAttendanceDB({
+          studentId,
+          date: normalizedDate,
+          status,
+        });
+
+        const { data, error } = await supabase
+          .from('asistencias')
+          .insert([payload])
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        const newAttendance = mapAttendance(data);
+        setAttendance((prev) => [...prev, newAttendance]);
+      }
+
+      await fetchData();
+
+      return { ok: true };
+    } catch (error) {
+      console.error('Error registrando asistencia:', error);
+      return {
+        ok: false,
+        error: error.message || 'No se pudo registrar la asistencia',
       };
-
-      const { data, error } = await supabase
-        .from('asistencias')
-        .insert([payload])
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      const newAttendance = mapAttendance(data);
-      setAttendance((prev) => [...prev, newAttendance]);
     }
+  };
 
-    await fetchData();
-
-    return { ok: true };
-  } catch (error) {
-    console.error('Error registrando asistencia:', error);
-    return {
-      ok: false,
-      error: error.message || 'No se pudo registrar la asistencia',
-    };
-  }
-};
   return (
     <AppContext.Provider
       value={{

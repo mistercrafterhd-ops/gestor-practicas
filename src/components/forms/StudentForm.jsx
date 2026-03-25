@@ -5,12 +5,12 @@ export const StudentForm = ({ student, onClose }) => {
   const { groups, students, addStudent, updateStudent } = useContext(AppContext);
   const isEditing = !!student?.id;
 
-  const [mode, setMode] = useState(isEditing ? 'manual' : 'existing');
-  const [selectedStudentId, setSelectedStudentId] = useState(student?.id || '');
+  const [mode, setMode] = useState('manual');
+  const [selectedStudentId, setSelectedStudentId] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
-    groupId: groups[0]?.id || '',
+    groupId: '',
     status: 'Activo',
     progress: 0,
     startDate: new Date().toISOString().split('T')[0],
@@ -34,10 +34,16 @@ export const StudentForm = ({ student, onClose }) => {
         observations: student.observations || '',
       });
     } else {
-      setFormData((prev) => ({
-        ...prev,
+      setMode('manual');
+      setSelectedStudentId('');
+      setFormData({
+        name: '',
         groupId: groups[0]?.id || '',
-      }));
+        status: 'Activo',
+        progress: 0,
+        startDate: new Date().toISOString().split('T')[0],
+        observations: '',
+      });
     }
   }, [student, groups]);
 
@@ -55,14 +61,15 @@ export const StudentForm = ({ student, onClose }) => {
       return;
     }
 
-    setFormData({
+    setFormData((prev) => ({
+      ...prev,
       name: selectedStudent.name || '',
-      groupId: selectedStudent.groupId || groups[0]?.id || '',
       status: selectedStudent.status || 'Activo',
       progress: selectedStudent.progress ?? 0,
-      startDate: selectedStudent.startDate || new Date().toISOString().split('T')[0],
+      startDate:
+        selectedStudent.startDate || new Date().toISOString().split('T')[0],
       observations: selectedStudent.observations || '',
-    });
+    }));
   };
 
   const handleChange = (e) => {
@@ -78,7 +85,13 @@ export const StudentForm = ({ student, onClose }) => {
     e.preventDefault();
 
     if (isEditing) {
-      await updateStudent(student.id, formData);
+      const result = await updateStudent(student.id, formData);
+
+      if (!result?.ok) {
+        alert(result?.error || 'No se pudo actualizar el alumno');
+        return;
+      }
+
       onClose();
       return;
     }
@@ -89,7 +102,45 @@ export const StudentForm = ({ student, onClose }) => {
         return;
       }
 
-      await updateStudent(selectedStudentId, formData);
+      const selectedStudent = students.find(
+        (s) => String(s.id) === String(selectedStudentId)
+      );
+
+      if (!selectedStudent) {
+        alert('No se encontró el alumno seleccionado');
+        return;
+      }
+
+      if (!formData.groupId) {
+        alert('Selecciona un grupo');
+        return;
+      }
+
+      const alreadyInGroup = students.some(
+        (s) =>
+          s.name?.trim().toLowerCase() === selectedStudent.name?.trim().toLowerCase() &&
+          String(s.groupId) === String(formData.groupId)
+      );
+
+      if (alreadyInGroup) {
+        alert('Ese alumno ya está asignado a ese grupo');
+        return;
+      }
+
+      const result = await addStudent({
+        name: selectedStudent.name,
+        groupId: formData.groupId,
+        status: formData.status || selectedStudent.status || 'Activo',
+        progress: formData.progress ?? selectedStudent.progress ?? 0,
+        startDate: formData.startDate || selectedStudent.startDate,
+        observations: formData.observations || selectedStudent.observations || '',
+      });
+
+      if (!result?.ok) {
+        alert(result?.error || 'No se pudo añadir el alumno al grupo');
+        return;
+      }
+
       onClose();
       return;
     }
@@ -99,7 +150,18 @@ export const StudentForm = ({ student, onClose }) => {
       return;
     }
 
-    await addStudent(formData);
+    if (!formData.groupId) {
+      alert('Selecciona un grupo');
+      return;
+    }
+
+    const result = await addStudent(formData);
+
+    if (!result?.ok) {
+      alert(result?.error || 'No se pudo crear el alumno');
+      return;
+    }
+
     onClose();
   };
 
@@ -127,22 +189,22 @@ export const StudentForm = ({ student, onClose }) => {
               <input
                 type="radio"
                 name="mode"
-                value="existing"
-                checked={mode === 'existing'}
-                onChange={() => setMode('existing')}
+                value="manual"
+                checked={mode === 'manual'}
+                onChange={() => setMode('manual')}
               />
-              Seleccionar existente
+              Crear nuevo alumno
             </label>
 
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
               <input
                 type="radio"
                 name="mode"
-                value="manual"
-                checked={mode === 'manual'}
-                onChange={() => setMode('manual')}
+                value="existing"
+                checked={mode === 'existing'}
+                onChange={() => setMode('existing')}
               />
-               Nuevo alumno
+              Añadir alumno existente
             </label>
           </div>
         </div>
@@ -228,6 +290,7 @@ export const StudentForm = ({ student, onClose }) => {
               color: 'var(--text-primary)',
             }}
           >
+            <option value="">Selecciona un grupo</option>
             {groups.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name}
@@ -373,7 +436,11 @@ export const StudentForm = ({ student, onClose }) => {
           Cancelar
         </button>
         <button type="submit" className="btn btn-primary">
-          {isEditing ? 'Guardar Cambios' : mode === 'existing' ? 'Asignar Alumno' : 'Añadir Alumno'}
+          {isEditing
+            ? 'Guardar Cambios'
+            : mode === 'existing'
+            ? 'Añadir al Grupo'
+            : 'Añadir Alumno'}
         </button>
       </div>
     </form>
